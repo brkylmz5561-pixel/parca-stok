@@ -125,6 +125,8 @@ h1,h2,h3,p{margin:0}
 .vf-stop{position:absolute;top:10px;right:10px;width:44px;height:44px;border-radius:22px;border:0;background:rgba(0,0,0,.5);color:#fff;display:none;place-items:center}
 .vf.run .vf-stop{display:grid}
 .vf-dbg{position:absolute;left:6px;bottom:6px;z-index:5;font:11px/1.35 ui-monospace,monospace;color:#9fe3c8;background:rgba(0,0,0,.65);padding:5px 8px;border-radius:7px;pointer-events:none;max-width:92%;white-space:pre-wrap}
+.vf-flip{position:absolute;top:10px;left:10px;height:36px;padding:0 12px;border-radius:18px;border:0;background:rgba(0,0,0,.5);color:#fff;font-size:13px;font-weight:600;display:none;align-items:center}
+.vf.run .vf-flip{display:flex}
 .btn.photo{position:relative;overflow:hidden}
 .btn.photo input{position:absolute;inset:0;width:100%;height:100%;opacity:0;font-size:0;cursor:pointer}
 .vf .btn{background:var(--card)}
@@ -358,12 +360,13 @@ function confirmSheet({title, text, ok, danger}) {
 
 /* ================= kamera ================= */
 const FORMATS_NATIVE = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','code_93','itf','codabar','qr_code','data_matrix'];
-const cam = {stream: null, timer: 0, libTimer: 0, token: 0, wanted: false, running: false, detector: null, handler: null, lastCode: '', lastAt: 0};
+const cam = {stream: null, timer: 0, libTimer: 0, token: 0, wanted: false, running: false, detector: null, handler: null, lastCode: '', lastAt: 0, devices: null, devIdx: 0};
 const camEl = document.createElement('div');
 camEl.className = 'vf idle';
 camEl.innerHTML = '<video playsinline muted></video><div id="h5q"></div>' +
   '<div class="frame"><i></i><i></i><i></i><i></i><b class="line"></b></div>' +
   '<button class="vf-stop" data-act="camstop" aria-label="Kamerayı kapat">' + X_ICON + '</button>' +
+  '<button class="vf-flip" data-act="camflip" aria-label="Kamerayı değiştir">⟲ Kamera değiştir</button>' +
   '<div class="vf-msg"></div>' +
   '<div class="vf-dbg"></div>';
 const camVideo = camEl.querySelector('video');
@@ -438,8 +441,18 @@ async function startCamera() {
       camEl.classList.add('lib'); camEl.classList.remove('native');
       h = new Html5Qrcode('h5q', {formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODE_93, F.ITF, F.CODABAR, F.QR_CODE], verbose: false});
       cam.h5 = h;
-      dbg('lib: starting camera...');
-      await h.start({facingMode: 'environment'}, {fps: 10, disableFlip: true}, txt => onCode(txt), () => {});
+      if (!cam.devices) {
+        try {
+          const list = await Html5Qrcode.getCameras();
+          cam.devices = list || [];
+          let idx = cam.devices.findIndex(d => /back|rear|environment|arka/i.test(d.label || ''));
+          if (idx < 0 && cam.devices.length > 1) idx = cam.devices.length - 1;
+          cam.devIdx = idx < 0 ? 0 : idx;
+        } catch (e) { cam.devices = []; }
+      }
+      const target = (cam.devices && cam.devices[cam.devIdx]) ? cam.devices[cam.devIdx].id : {facingMode: 'environment'};
+      dbg('lib: starting, cams=' + (cam.devices ? cam.devices.length : 0) + ' idx=' + cam.devIdx + ' target=' + (typeof target === 'string' ? target : JSON.stringify(target)));
+      await h.start(target, {fps: 10, disableFlip: true}, txt => onCode(txt), () => {});
       if (my !== cam.token) { await stopH5(h); return; }
       cam.running = true;
       setCam('run');
@@ -478,6 +491,13 @@ async function stopCamera() {
   camVideo.srcObject = null;
   await stopH5();
   if (t === cam.token) setCam('idle');
+}
+async function flipCamera() {
+  if (!cam.devices || cam.devices.length < 2) { dbg('Sadece 1 kamera bulundu, değiştirilemiyor.'); return; }
+  cam.devIdx = (cam.devIdx + 1) % cam.devices.length;
+  cam.wanted = true;
+  await stopCamera();
+  startCamera();
 }
 async function tick(my) {
   if (my !== cam.token || !cam.running) return;
@@ -908,6 +928,7 @@ const ACT = {
   'new-part': b => openPartForm({ctx: 'stok', prefill: b.dataset.pre ? {parcaNo: b.dataset.pre} : null}),
   camstart: () => startCamera(),
   camstop: () => { cam.wanted = false; stopCamera(); },
+  camflip: () => flipCamera(),
   manual: doManual,
   'sayim-start': () => {
     const raf = ($('#sraf').value || '').trim();

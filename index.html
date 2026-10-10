@@ -358,7 +358,7 @@ function confirmSheet({title, text, ok, danger}) {
 
 /* ================= kamera ================= */
 const FORMATS_NATIVE = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','code_93','itf','codabar','qr_code','data_matrix'];
-const cam = {stream: null, timer: 0, token: 0, wanted: false, running: false, detector: null, handler: null, lastCode: '', lastAt: 0};
+const cam = {stream: null, timer: 0, libTimer: 0, token: 0, wanted: false, running: false, detector: null, handler: null, lastCode: '', lastAt: 0};
 const camEl = document.createElement('div');
 camEl.className = 'vf idle';
 camEl.innerHTML = '<video playsinline muted></video><div id="h5q"></div>' +
@@ -443,8 +443,15 @@ async function startCamera() {
       if (my !== cam.token) { await stopH5(h); return; }
       cam.running = true;
       setCam('run');
-      const v = document.querySelector('#h5q video');
-      dbg('lib: running, video found=' + !!v + (v ? ' ' + v.videoWidth + 'x' + v.videoHeight : ''));
+      let pc = 0;
+      clearInterval(cam.libTimer);
+      cam.libTimer = setInterval(() => {
+        if (my !== cam.token || !cam.running) { clearInterval(cam.libTimer); return; }
+        const vv = document.querySelector('#h5q video');
+        pc++;
+        dbg('lib #' + pc + ' ' + (vv ? vv.videoWidth + 'x' + vv.videoHeight + ' rs=' + vv.readyState + ' paused=' + vv.paused + ' srcObj=' + !!vv.srcObject + ' tracks=' + (vv.srcObject ? vv.srcObject.getVideoTracks().length : '-') : 'VIDEO YOK'));
+        if (pc > 40) clearInterval(cam.libTimer);
+      }, 500);
     }
   } catch (e) {
     if (my !== cam.token) return;
@@ -466,6 +473,7 @@ async function stopCamera() {
   const t = ++cam.token;
   cam.running = false;
   clearTimeout(cam.timer);
+  clearInterval(cam.libTimer);
   if (cam.stream) { cam.stream.getTracks().forEach(x => x.stop()); cam.stream = null; }
   camVideo.srcObject = null;
   await stopH5();

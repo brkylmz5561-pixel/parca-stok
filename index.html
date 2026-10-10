@@ -124,6 +124,7 @@ h1,h2,h3,p{margin:0}
 .vf.run .vf-msg{display:none}
 .vf-stop{position:absolute;top:10px;right:10px;width:44px;height:44px;border-radius:22px;border:0;background:rgba(0,0,0,.5);color:#fff;display:none;place-items:center}
 .vf.run .vf-stop{display:grid}
+.vf-dbg{position:absolute;left:6px;bottom:6px;z-index:5;font:11px/1.35 ui-monospace,monospace;color:#9fe3c8;background:rgba(0,0,0,.65);padding:5px 8px;border-radius:7px;pointer-events:none;max-width:92%;white-space:pre-wrap}
 .btn.photo{position:relative;overflow:hidden}
 .btn.photo input{position:absolute;inset:0;width:100%;height:100%;opacity:0;font-size:0;cursor:pointer}
 .vf .btn{background:var(--card)}
@@ -363,10 +364,13 @@ camEl.className = 'vf idle';
 camEl.innerHTML = '<video playsinline muted></video><div id="h5q"></div>' +
   '<div class="frame"><i></i><i></i><i></i><i></i><b class="line"></b></div>' +
   '<button class="vf-stop" data-act="camstop" aria-label="Kamerayı kapat">' + X_ICON + '</button>' +
-  '<div class="vf-msg"></div>';
+  '<div class="vf-msg"></div>' +
+  '<div class="vf-dbg"></div>';
 const camVideo = camEl.querySelector('video');
 camVideo.muted = true;
 const camMsg = camEl.querySelector('.vf-msg');
+const camDbg = camEl.querySelector('.vf-dbg');
+function dbg(s) { if (camDbg) camDbg.textContent = s; }
 
 function setCam(state, msg) {
   camEl.classList.remove('idle', 'starting', 'run', 'err');
@@ -408,6 +412,7 @@ async function startCamera() {
   cam.wanted = true;
   setCam('starting');
   let h = null;
+  dbg('BD:' + ('BarcodeDetector' in window) + ' secure:' + window.isSecureContext + ' UA:' + navigator.userAgent.slice(0, 70));
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw {name: 'NotFoundError'};
     if ('BarcodeDetector' in window) {
@@ -418,27 +423,35 @@ async function startCamera() {
       if (my !== cam.token) { stream.getTracks().forEach(t => t.stop()); return; }
       cam.stream = stream;
       camVideo.srcObject = stream;
+      dbg('native: stream ok, tracks=' + stream.getTracks().length + ' playing...');
       await camVideo.play();
       camEl.classList.add('native'); camEl.classList.remove('lib');
       cam.running = true;
       setCam('run');
+      dbg('native: play ok ' + camVideo.videoWidth + 'x' + camVideo.videoHeight + ' rs=' + camVideo.readyState);
       tick(my);
     } else {
+      dbg('lib: loading html5-qrcode...');
       await loadH5();
       if (my !== cam.token) return;
       const F = window.Html5QrcodeSupportedFormats;
       camEl.classList.add('lib'); camEl.classList.remove('native');
       h = new Html5Qrcode('h5q', {formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODE_93, F.ITF, F.CODABAR, F.QR_CODE], verbose: false});
       cam.h5 = h;
+      dbg('lib: starting camera...');
       await h.start({facingMode: 'environment'}, {fps: 10, disableFlip: true}, txt => onCode(txt), () => {});
       if (my !== cam.token) { await stopH5(h); return; }
       cam.running = true;
       setCam('run');
+      const v = document.querySelector('#h5q video');
+      dbg('lib: running, video found=' + !!v + (v ? ' ' + v.videoWidth + 'x' + v.videoHeight : ''));
     }
   } catch (e) {
     if (my !== cam.token) return;
     cam.running = false; cam.wanted = false;
     await stopH5(h);
+    const txt = typeof e === 'string' ? e : ((e && e.name) || '') + ' ' + ((e && e.message) || '');
+    dbg('HATA: ' + txt);
     setCam('err', camErr(e));
   }
 }
@@ -460,6 +473,7 @@ async function stopCamera() {
 }
 async function tick(my) {
   if (my !== cam.token || !cam.running) return;
+  dbg('native run ' + camVideo.videoWidth + 'x' + camVideo.videoHeight + ' rs=' + camVideo.readyState + ' paused=' + camVideo.paused);
   if (!scanPaused && camVideo.readyState >= 2) {
     try { const r = await cam.detector.detect(camVideo); if (r && r.length) onCode(r[0].rawValue); } catch (e) {}
   }
